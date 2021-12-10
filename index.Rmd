@@ -46,7 +46,7 @@ class_diag <- function(score, truth, positive, cutoff=.5){
 
 # Mining, Classification, Prediction
 
-## Name and EID here
+## Mark Moreno and mam24932 here
 
 ### Introduction 
 
@@ -54,80 +54,230 @@ Paragraph or two introducing your datasets and variables, why they are interesti
 
 ```{R}
 library(tidyverse)
-# read your datasets in here, e.g., with read_csv()
 
-# if your dataset needs tidying, do so here
+RAPTORDATA <- read_csv(file = "modern_RAPTOR_by_player.csv")
+ALLSTARS <- read.csv("NBA All Star Games (1).csv")
+mpg<- read.csv("mpgstats.csv")
+mpg<- mpg %>% distinct()
 
-# any other code here
+RAPTORDATA<- RAPTORDATA %>% filter(season == 2016) ## fitlers to a single season
+ALLSTARS <- read.csv("NBA All Star Games (1).csv")
+ALLSTARS <- ALLSTARS %>% filter(Year == 2016)
+ALLSTARS <- ALLSTARS %>% select(1:3)
+
+
+ALLSTARS <- ALLSTARS %>% rename(player_name = Player)
+df<- left_join(RAPTORDATA,ALLSTARS)
+df<- df %>% select(-22)
+df$Selection.Type<- as.logical(df$Selection.Type)
+df[is.na(df)] <- FALSE 
+#gives us the all stars in logical vector
+df<- left_join(mpg,df)
+df <- df %>% drop_na()
+df <- df %>% mutate(starter = MPG>25.5)#creating a group for starters and non-starters (logical)
+df %>% count(starter)
+df <- df %>% distinct(player_name,.keep_all = T) #REMOVES DUPLICATE PLAYERS
+
+df <- df %>% filter(mp>100) #removes players who did not play many games 
+dfnames<- df
+
 ```
+This data is important to me because I have always been a basketball fan and want to see what it takes to become a great player in the league. This analysis will help me understand what types of impacts some of the best players in the league have. I chose the RAPTOR dataset because it is well known to be one of the best ways to analyze basketball player performance with many different measurements of their skill. I wanted to add a binary variable that was for just the players who made the all-star game so I used left Join to create a new data frame with both the analytic data and also whether they had become an all-star or not. I also added whether they were a starter or not to see how it matched up with our clusters that were created. 
 
 ### Cluster Analysis
 
 ```{R}
 library(cluster)
+
+pam_dat<-df%>%select(raptor_total,war_total,pace_impact,predator_total)
+sil_width<-vector()
+for(i in 2:10){  
+  pam_fit <- pam(pam_dat, k = i)  
+  sil_width[i] <- pam_fit$silinfo$avg.width  
+}
+ggplot()+geom_line(aes(x=1:10,y=sil_width))+scale_x_continuous(name="k",breaks=1:10)
+#2 was the best choice for all of the different variables maximizing the sil width.
+ 
+library(cluster) #load the cluster package
+pam1 <- df %>% select(raptor_total,war_total,pace_impact,predator_total)%>% pam(k=2) #use the pam function
+library(GGally)
+df %>% mutate(cluster=as.factor(pam1$clustering)) %>%
+ggpairs(columns = c("raptor_total","war_total","pace_impact","predator_total"), aes(color=cluster))
+
+pam1$silinfo$avg.width
+
+df %>% mutate(cluster=as.factor(pam1$clustering))%>%
+  ggplot(aes(x=raptor_total,y=predator_total, color=cluster))+geom_point(size=2)+geom_jitter(height = 2, width = 2)+theme_minimal()
+
+df %>% mutate(cluster=as.factor(pam1$clustering))%>%
+  ggplot(aes(x=raptor_total,y=predator_total, color=starter))+geom_point(size=2)+geom_jitter(height = 2, width = 2)+theme_minimal()
 # clustering code here
 ```
 
-Discussion of clustering here
+I was able to perform a PAM (partioning around Mediods) analyis for 4 of my variables. I chose these 4 variables because the other variables usually played a role in the creation of these variables.My clustering data provided me with a silhouette width of .45 which means there was only a weak or artificial relationship between these two groups. There is a strong correlation relationship between the raptor total and the predator total which makes sense because these are two overall measurements for the effect that any player has on the court at one time. I included graphs of both the different clusters along with starters vs non-starters to show how the clusters related to the starter vs non-starter graphs. However as shown in the ggpairs graph there was not much differences between the two clusters especially for the pace impact variable. This makes it tough for the code to find a good spot to break these two clusters. I also included some extra linear graphs to see how my clusters were able to line up with my starters and non-starter groups. They look fairly similar however unlike the clusters, it seems some bench-players overperform while starters vastly underperform. 
     
     
 ### Dimensionality Reduction with PCA
 
 ```{R}
-# PCA code here
+df_nums<-df %>% select_if(is.numeric) %>% scale
+rownames(df_nums)<-df$player_name
+df_nums<- as.data.frame(df_nums)
+df_nums <- df_nums %>% select(c(-1,-2,-3,-4))#remove extraneous data
+
+df_pca<- princomp(df_nums,cor = T)
+
+eigval<-df_pca$sdev^2 #square to convert SDs to eigenvalues
+varprop=round(eigval/sum(eigval), 2) #proportion of var explained by each PC
+
+round(cumsum(eigval)/sum(eigval), 2)
+#I will be keeping the first 3 comparisons 
+summary(df_pca, loadings=T)
+
+
+library(factoextra)
+fviz_pca_biplot(df_pca,repel = T)
+
 ```
 
-Discussions of PCA here. 
+  For the fist comparison group it included all the variables but the pace_impact variable. Being high on this meant you were overall a great player as your RAPTOR & predator scores were dependent on how well you played. For the second comparison group the WAR totals were left out and pace_impact was still left out. WAR is affected by many attributes not calculated with the RAPTOR or Predator data. However, more importantly, this looks at the offense vs defense, with lower scores meaning better at defense while higher numbers meant better at offense. Finally the third comparison group includes the pace_impact variable which is able to measure how much impact a player had on a game. Lower numbers meant better impact while higher numbers meant worse impact and a worse WAR. Higher numbers also meant higher raptor than lower numbers however the raptor data was very close to 0 signifying not too strong of a relationship. The first comparison group accounts for 57% of the variance while group 2 accounts 15% and finally the last comp group accounts for only 9%. 
+  
+  The bi-plot is scatter plot of the placement of the different players along the first two comparison groups. This plot can be understood as those players who go nearly vertically down being better at defense while those in the top right quadrant are overall better at offense. I did identified some outliers, Draymond Green, Stephen curry , and Elton Brand. Draymond green was incredible on defense (6 RAPTOR), while being great at offense (8 RAPTOR) as well. Stephen curry had the best offensive season (10 RAPTOR) ever hence why he is in a league of his own in the top right quadrant. Elton brand was terrible on offense (-4 RAPTOR), while being amazing on defense (5 RAPTOR) showing why he goes straight vertically down.
 
 ###  Linear Classifier
 
 ```{R}
-# linear classifier code here
+
+df$starter <- as.numeric(df$starter)
+df$Selection.Type <- as.numeric(df$Selection.Type)
+df%>% ggplot(aes(raptor_total,Selection.Type))+geom_point()+geom_smooth(method="lm", se=F)+ylim(0,1)
+
+df <- df %>% select(7:23) 
+glimpse(df) #note that Legendary is factor type; since "True" comes after "False" in the alphabet, a positive case will be "True"
+fit<- glm(Selection.Type ~ . , data=df, family="binomial") 
+probs<- predict(fit,type = "response")
+class_diag(probs,df$Selection.Type,positive = 1)
+table(truth = df$Selection.Type, predictions = probs>.5)
+
 ```
 
 ```{R}
+k=20 #choose number of folds
+set.seed(1237)
+data<-df[sample(nrow(df)),] #randomly order rows
+folds<-cut(seq(1:nrow(df)),breaks=k,labels=F) #create folds
+diags<-NULL
+for(i in 1:k){
+  ## Create training and test sets
+  train<-data[folds!=i,] 
+  test<-data[folds==i,]
+  truth<-test$Selection.Type ## Truth labels for fold i
+  ## Train model on training set (all but fold i)
+  fit<-glm(Selection.Type~.,data=train,family="binomial")
+  ## Test model on test set (fold i) 
+  probs<-predict(fit,newdata = test,type="response")
+  ## Get diagnostics for fold i
+  diags<-rbind(diags,class_diag(probs,truth, positive=1))
+}
+
+summarize_all(diags,mean)
+
 # cross-validation of linear classifier here
 ```
 
-Discussion here
+I was able to find the AUC value for my linear classifier of my binary variable of all-star selection. There was 24 players that year who made the all-star team, according to my matrix it was alright at predicting the all-stars it predicted 14 of the 24 correctly also predicting 363 of the non-all-stars correctly. This led to an AUC of 96.7% which is incredibly high. However, after running cross-validation I was able the AUC I was received from the k-fold was much different after running it multiple times it ranged from 50-75 AUC. This meant there was a good amount of over-fitting. This overfitting is a result of the predictions being too close to our training data and if further data was added it would be unable to correctly predict where it would go. 
 
 ### Non-Parametric Classifier
 
 ```{R}
 library(caret)
+fit <- knn3(Selection.Type ~ . , data=df)
+probs <- predict(fit, newdata=df)[,2] #we choose the second column since that's the probability of "True"
+class_diag(probs, df$Selection.Type, positive=1) 
+table(truth = df$Selection.Type, predictions = probs>.5)
 # non-parametric classifier code here
 ```
 
+
 ```{R}
-# cross-validation of np classifier here
+
+k=10 #choose number of folds
+set.seed(1234)
+data<-df[sample(nrow(df)),] #randomly order rows
+folds<-cut(seq(1:nrow(df)),breaks=k,labels=F) #create 10 folds
+diags<-NULL
+for(i in 1:k){
+  ## Create training and test sets
+  train<-data[folds!=i,] 
+  test<-data[folds==i,]
+  truth<-test$Selection.Type
+  ## Train model on training set
+  fit<-knn3(Selection.Type~.,data=train)
+  probs<-predict(fit,newdata = test)[,2]
+  ## Test model on test set (save all k results)
+  diags<-rbind(diags,class_diag(probs,truth, positive=1))
+}
+
+summarize_all(diags,mean)
 ```
 
-Discussion
-
+  The non-parametric classifier had a higher AUC but not a noticeable difference in between the two with the AUC going from 96% to 98%. However, much like the previous the cross-validation shows that obvious signs of overfitting. With this seed the AUC turned to 77% a significant reduction from the 98% that was originally given. This was confirmed with various seeds where the AUC ranged from 60-80%. This meant that our non-parametric model was just as good as the linear-classifier, however both of them were not very good.  
 
 ### Regression/Numeric Prediction
 
 ```{R}
-# regression model code here
+
+fit2<-lm(war_total~raptor_total+pace_impact+Selection.Type,data=df) #predict war_total from raptor_total+pace_impact
+yhat<-predict(fit2) 
+
+mean((df$war_total-yhat)^2)
+
 ```
 
 ```{R}
+
+k=10 #choose number of folds
+set.seed(1235)
+data<-df[sample(nrow(df)),] #randomly order rows
+folds<-cut(seq(1:nrow(df)),breaks=k,labels=F) #create folds
+diags<-NULL
+for(i in 1:k){
+  train<-data[folds!=i,]
+  test<-data[folds==i,]
+  ## Fit linear regression model to training set
+  fit<-lm(war_total~raptor_total+pace_impact+Selection.Type,data=df)
+  ## Get predictions/y-hats on test set (fold i)
+  yhat<-predict(fit,newdata=test)
+  ## Compute prediction error  (MSE) for fold i
+  diags<-mean((test$war_total-yhat)^2) 
+}
+mean(diags)
 # cross-validation of regression model here
 ```
 
-Discussion
+The results I got from my linear regression and the cross validation were surprising. My linear regression did not show any signs of overfitting unlike the previous parts of my analysis. I think this stems from predicting the WAR (wins above replacement) data from data that shows how well a player performs in a game making it very easy to predict the wins above replacement. This was able to confirm that my linear regression model was a good fit and predicted the numeric variable of WAR pretty well. I ran with many different seeds and most of them came out to being the same MSE which was lower than the original further confirming my data. 
 
 ### Python 
 
 ```{R}
 library(reticulate)
+use_python("/usr/bin/python3", required = F)
+
 ```
 
 ```{python}
-# python code here
+print(r.RAPTORDATA)
+bob = "Have a nice winter break"
+
 ```
 
-Discussion
+
+```{R}
+print(c(py$bob))
+
+
+```
+I wanted to do something simple for this portion so I just printed out original data frame. This was done using the dataframe object that I had created in R as reticulate is able to share objects between R and python. Finally, I shared a string from python to R. 
 
 ### Concluding Remarks
 
